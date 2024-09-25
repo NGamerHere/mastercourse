@@ -1,10 +1,17 @@
-using System.ComponentModel.DataAnnotations;
-using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+builder.Services.AddDistributedMemoryCache(); // Enables in-memory caching for sessions
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromMinutes(30); 
+    options.Cookie.HttpOnly = true;                 
+    options.Cookie.IsEssential = true;              // Ensure cookie is essential for session
+});
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -13,8 +20,11 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 var app = builder.Build();
 
+// Enable session middleware
+app.UseSession();
 
-app.MapGet("/users", async (ApplicationDbContext db) =>{
+app.MapGet("/users", async (ApplicationDbContext db) =>
+{
     var users = await db.EmployeeDetails.ToListAsync();
     return users.Any() ? Results.Ok(users) : Results.NoContent();
 });
@@ -25,45 +35,84 @@ app.MapGet("/users/{id}", async (int id, ApplicationDbContext db) =>
     return user is not null ? Results.Ok(user) : Results.NotFound();
 });
 
-app.MapPost("/registration",async (EmployeeDetails employeeDetails, ApplicationDbContext db) =>
+app.MapPost("/registration", async (EmployeeDetails employeeDetails, ApplicationDbContext db) =>
 {
-    if (employeeDetails == null)
-    {
-        return Results.BadRequest("User is null");
-    }
+    if (employeeDetails == null) return Results.BadRequest("User is null");
     employeeDetails.Id = 0;
     db.EmployeeDetails.Add(employeeDetails);
     await db.SaveChangesAsync();
     return Results.Created($"/users/{employeeDetails.Id}", employeeDetails);
 });
 
-app.MapPost("/login", async (LoginDetails loginDetails , ApplicationDbContext db) => {
+app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, ApplicationDbContext db) =>
+{
     var user = await db.EmployeeDetails.FirstOrDefaultAsync(u => u.Email == loginDetails.Email);
+
     if (user == null)
     {
-        var message = new {
-              message = "Login Failed",
+        var message = new
+        {
+            message = "Login Failed"
         };
-        return Results.Json(message,statusCode:404);
+        return Results.Json(message, statusCode: 404);
     }
 
     if (user.Password == loginDetails.Password)
     {
+        // Store session data after successful login
+        context.Session.SetString("UserId", user.Id.ToString());
+        context.Session.SetString("UserEmail", user.Email);
+
         var successMessage = new
         {
-            message = "ok",
+            message = "Login successful",
+            UserId = user.Id
         };
-        return Results.Json(successMessage);
-    }else
+        return Results.Json(successMessage, statusCode: 200);
+    }
+    else
     {
-        var successMessage = new
+        var errorMessage = new
         {
-            message = "invalid password",
+            message = "Invalid password"
         };
-        return Results.Json(successMessage,statusCode: 401);
+        return Results.Json(errorMessage, statusCode: 401);
+    }
+});
+
+app.MapGet("/dashboard", async (HttpContext context, ApplicationDbContext db) => {
+    var userIdString = context.Session.GetString("UserId");
+    if (string.IsNullOrEmpty(userIdString)) {
+        var errorMessage = new
+        { 
+            message = "User is not logged in" 
+        };
+        return Results.Json(errorMessage, statusCode: 401); 
     }
 
+    // Convert userId to an integer
+    if (!int.TryParse(userIdString, out int userId)) {
+        var errorMessage = new { message = "Invalid user ID" };
+        return Results.Json(errorMessage, statusCode: 400); 
+    }
+
+    // Find the user by their ID
+    var user = await db.EmployeeDetails.FindAsync(userId);
+    
+    if (user == null) {
+        var errorMessage = new { message = "User not found" };
+        return Results.Json(errorMessage, statusCode: 404); 
+    }
+    
+    var message = new {
+        message = "Welcome to your dashboard",
+        UserId = userId,
+        Email = user.Email
+    };
+
+    return Results.Ok(message);
 });
+
 
 app.MapPut("/users/{id}", async (int id, EmployeeDetails updatedUser, ApplicationDbContext db) =>
 {
@@ -91,26 +140,20 @@ public class ApplicationDbContext : DbContext
     {
     }
 
-    // Define your DbSet properties here
-    // public DbSet<Employee> Employees { get; set; }
-
-    public DbSet<EmployeeDetails> EmployeeDetails{get; set;}
-
-    
-    
+    public DbSet<EmployeeDetails> EmployeeDetails { get; set; }
 }
 
-public class EmployeeDetails{
-   public int Id {get ; set ;}
-   public string Name { get ; set ; }
-
-   public string Email { get; set; }
-   public string Password {get ; set;}
-   public string Role { get ; set ; }
+public class EmployeeDetails
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+    public string Email { get; set; }
+    public string Password { get; set; }
+    public string Role { get; set; }
 }
 
-public class LoginDetails{
-  public string Email { get ; set ; }
-  
-  public string Password { get ; set ; }
+public class LoginDetails
+{
+    public string Email { get; set; }
+    public string Password { get; set; }
 }
