@@ -23,20 +23,17 @@ var app = builder.Build();
 // Enable session middleware
 app.UseSession();
 
-app.MapGet("/users", async (ApplicationDbContext db) =>
-{
+app.MapGet("/users", async (ApplicationDbContext db) => {
     var users = await db.EmployeeDetails.ToListAsync();
     return users.Any() ? Results.Ok(users) : Results.NoContent();
 });
 
-app.MapGet("/users/{id}", async (int id, ApplicationDbContext db) =>
-{
+app.MapGet("/users/{id}", async (int id, ApplicationDbContext db) => {
     var user = await db.EmployeeDetails.FindAsync(id);
     return user is not null ? Results.Ok(user) : Results.NotFound();
 });
 
-app.MapPost("/registration", async (EmployeeDetails employeeDetails, ApplicationDbContext db) =>
-{
+app.MapPost("/registration", async (EmployeeDetails employeeDetails, ApplicationDbContext db) => {
     if (employeeDetails == null) return Results.BadRequest("User is null");
     employeeDetails.Id = 0;
     db.EmployeeDetails.Add(employeeDetails);
@@ -44,8 +41,7 @@ app.MapPost("/registration", async (EmployeeDetails employeeDetails, Application
     return Results.Created($"/users/{employeeDetails.Id}", employeeDetails);
 });
 
-app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, ApplicationDbContext db) =>
-{
+app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, ApplicationDbContext db) => {
     var user = await db.EmployeeDetails.FirstOrDefaultAsync(u => u.Email == loginDetails.Email);
 
     if (user == null)
@@ -57,11 +53,9 @@ app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, App
         return Results.Json(message, statusCode: 404);
     }
 
-    if (user.Password == loginDetails.Password)
-    {
+    if (user.Password == loginDetails.Password) {
         // Store session data after successful login
         context.Session.SetString("UserId", user.Id.ToString());
-        context.Session.SetString("UserEmail", user.Email);
 
         var successMessage = new
         {
@@ -70,8 +64,7 @@ app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, App
         };
         return Results.Json(successMessage, statusCode: 200);
     }
-    else
-    {
+    else {
         var errorMessage = new
         {
             message = "Invalid password"
@@ -114,13 +107,9 @@ app.MapGet("/dashboard", async (HttpContext context, ApplicationDbContext db) =>
 });
 
 
-app.MapPut("/users/{id}", async (int id, EmployeeDetails updatedUser, ApplicationDbContext db) =>
-{
+app.MapPut("/users/{id}", async (int id, EmployeeDetails updatedUser, ApplicationDbContext db) => {
     var user = await db.EmployeeDetails.FindAsync(id);
-    if (user == null)
-    {
-        return Results.NotFound();
-    }
+    if (user == null) { return Results.NotFound(); }
 
     user.Name = updatedUser.Name ?? user.Name;
     user.Email = updatedUser.Email ?? user.Email;
