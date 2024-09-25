@@ -35,23 +35,23 @@ app.MapGet("/users/{id}", async (int id, ApplicationDbContext db) => {
 
 app.MapPost("/registration", async (EmployeeDetails employeeDetails, ApplicationDbContext db) => {
     if (employeeDetails == null) return Results.BadRequest("User is null");
+    
     employeeDetails.Id = 0;
     db.EmployeeDetails.Add(employeeDetails);
     await db.SaveChangesAsync();
     return Results.Created($"/users/{employeeDetails.Id}", employeeDetails);
+        
 });
 
 app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, ApplicationDbContext db) => {
     var user = await db.EmployeeDetails.FirstOrDefaultAsync(u => u.Email == loginDetails.Email);
 
-    if (user == null)
-    {
+    if (user == null) {
         var message = new
         {
             message = "Login Failed"
         };
-        return Results.Json(message, statusCode: 404);
-    }
+        return Results.Json(message, statusCode: 404); }
 
     if (user.Password == loginDetails.Password) {
         // Store session data after successful login
@@ -73,34 +73,40 @@ app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, App
     }
 });
 
-app.MapGet("/dashboard", async (HttpContext context, ApplicationDbContext db) => {
+app.MapGet("/dashboard", async (HttpContext context, ApplicationDbContext db) =>
+{
     var userIdString = context.Session.GetString("UserId");
-    if (string.IsNullOrEmpty(userIdString)) {
+    if (string.IsNullOrEmpty(userIdString))
+    {
         var errorMessage = new
-        { 
-            message = "User is not logged in" 
+        {
+            message = "User is not logged in"
         };
-        return Results.Json(errorMessage, statusCode: 401); 
+        return Results.Json(errorMessage, statusCode: 401);
     }
 
     // Convert userId to an integer
-    if (!int.TryParse(userIdString, out int userId)) {
+    if (!int.TryParse(userIdString, out int userId))
+    {
         var errorMessage = new { message = "Invalid user ID" };
-        return Results.Json(errorMessage, statusCode: 400); 
+        return Results.Json(errorMessage, statusCode: 400);
     }
 
     // Find the user by their ID
     var user = await db.EmployeeDetails.FindAsync(userId);
-    
-    if (user == null) {
+
+    if (user == null)
+    {
         var errorMessage = new { message = "User not found" };
-        return Results.Json(errorMessage, statusCode: 404); 
+        return Results.Json(errorMessage, statusCode: 404);
     }
-    
-    var message = new {
+
+    var message = new
+    {
         message = "Welcome to your dashboard",
         UserId = userId,
-        Email = user.Email
+        Email = user.Email,
+        role = user.Role
     };
 
     return Results.Ok(message);
