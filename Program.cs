@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,10 +13,6 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-app.MapGet("/", () => "Hello World!");
-
-
 
 app.MapGet("/users", async (ApplicationDbContext db) =>{
     var users = await db.EmployeeDetails.ToListAsync();
@@ -28,7 +25,7 @@ app.MapGet("/users/{id}", async (int id, ApplicationDbContext db) =>
     return user is not null ? Results.Ok(user) : Results.NotFound();
 });
 
-app.MapPost("/add",async (EmployeeDetails employeeDetails, ApplicationDbContext db) =>
+app.MapPost("/registration",async (EmployeeDetails employeeDetails, ApplicationDbContext db) =>
 {
     if (employeeDetails == null)
     {
@@ -38,6 +35,34 @@ app.MapPost("/add",async (EmployeeDetails employeeDetails, ApplicationDbContext 
     db.EmployeeDetails.Add(employeeDetails);
     await db.SaveChangesAsync();
     return Results.Created($"/users/{employeeDetails.Id}", employeeDetails);
+});
+
+app.MapPost("/login", async (LoginDetails loginDetails , ApplicationDbContext db) => {
+    var user = await db.EmployeeDetails.FirstOrDefaultAsync(u => u.Email == loginDetails.Email);
+    if (user == null)
+    {
+        var message = new {
+              message = "Login Failed",
+        };
+        return Results.Json(message,statusCode:404);
+    }
+
+    if (user.Password == loginDetails.Password)
+    {
+        var successMessage = new
+        {
+            message = "ok",
+        };
+        return Results.Json(successMessage);
+    }else
+    {
+        var successMessage = new
+        {
+            message = "invalid password",
+        };
+        return Results.Json(successMessage,statusCode: 401);
+    }
+
 });
 
 app.MapPut("/users/{id}", async (int id, EmployeeDetails updatedUser, ApplicationDbContext db) =>
@@ -82,4 +107,10 @@ public class EmployeeDetails{
    public string Email { get; set; }
    public string Password {get ; set;}
    public string Role { get ; set ; }
+}
+
+public class LoginDetails{
+  public string Email { get ; set ; }
+  
+  public string Password { get ; set ; }
 }
