@@ -4,22 +4,30 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAllOrigins",
-        builder => builder.AllowAnyOrigin() 
-            .AllowAnyHeader()  
-            .AllowAnyMethod());
+    options.AddPolicy("AllowAngularOrigins", builder =>
+    {
+        builder.WithOrigins("http://localhost:4200") 
+               .AllowAnyMethod()
+               .AllowAnyHeader()
+               .AllowCredentials();
+    });
 });
+
+
+
 
 // Add services to the container.
 builder.Services.AddDistributedMemoryCache(); 
 builder.Services.AddSession(options =>
 {
-    options.IdleTimeout = TimeSpan.FromMinutes(30000); 
+    options.IdleTimeout = TimeSpan.FromMinutes(30); 
     options.Cookie.HttpOnly = true;                 
-    options.Cookie.IsEssential = true;              // Ensure cookie is essential for session
+    options.Cookie.IsEssential = true;
 });
+
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
@@ -29,10 +37,9 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 var app = builder.Build();
 
-app.UseCors("AllowAllOrigins");
-
-// Enable session middleware
+app.UseCors("AllowAngularOrigins");
 app.UseSession();
+
 
 app.MapGet("/users", async (ApplicationDbContext db) => {
     var users = await db.EmployeeDetails.ToListAsync();
@@ -67,69 +74,42 @@ app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, App
     var user = await db.EmployeeDetails.FirstOrDefaultAsync(u => u.Email == loginDetails.Email);
 
     if (user == null) {
-        var message = new
-        {
-            message = "Login Failed"
-        };
-        return Results.Json(message, statusCode: 404); }
+        return Results.Json(new { message = "Login Failed" }, statusCode: 404);
+    }
 
     if (user.Password == loginDetails.Password) {
         context.Session.SetString("UserId", user.Id.ToString());
         context.Session.SetString("role", user.Role);
+        Console.WriteLine(user.Id.ToString());
+        Console.WriteLine(user.Role);   
+        return Results.Json(new { message = "Login successful", UserId = user.Id }, statusCode: 200);
+    }
 
-        var successMessage = new
-        {
-            message = "Login successful",
-            UserId = user.Id
-        };
-        return Results.Json(successMessage, statusCode: 200);
-    }
-    else {
-        var errorMessage = new
-        {
-            message = "Invalid password"
-        };
-        return Results.Json(errorMessage, statusCode: 401);
-    }
+    return Results.Json(new { message = "Invalid password" }, statusCode: 401);
 });
 
-app.MapGet("/dashboard", async (HttpContext context, ApplicationDbContext db) =>
-{
+app.MapGet("/dashboard", async (HttpContext context, ApplicationDbContext db) => {
     var userIdString = context.Session.GetString("UserId");
-    if (string.IsNullOrEmpty(userIdString))
-    {
-        var errorMessage = new
-        {
-            message = "User is not logged in"
-        };
-        return Results.Json(errorMessage, statusCode: 401);
+    
+    if (string.IsNullOrEmpty(userIdString)) {
+        Console.WriteLine(userIdString);
+        Console.WriteLine("this is called");
+        return Results.Json(new { message = "User is not logged in", error = "notLogged" }, statusCode: 401);
     }
 
-    // Convert userId to an integer
-    if (!int.TryParse(userIdString, out int userId))
-    {
-        var errorMessage = new { message = "Invalid user ID" };
-        return Results.Json(errorMessage, statusCode: 400);
+    if (!int.TryParse(userIdString, out int userId)) {
+        return Results.Json(new { message = "Invalid user ID" }, statusCode: 400);
     }
 
-    // Find the user by their ID
     var user = await db.EmployeeDetails.FindAsync(userId);
-
+    
     if (user == null) {
-        var errorMessage = new { message = "User not found" };
-        return Results.Json(errorMessage, statusCode: 404);
+        return Results.Json(new { message = "User not found" }, statusCode: 404);
     }
 
-    var message = new
-    {
-        message = "Welcome to your dashboard",
-        UserId = userId,
-        Email = user.Email,
-        role = user.Role
-    };
-
-    return Results.Ok(message);
+    return Results.Ok(new { message = "Welcome to your dashboard", UserId = userId, Email = user.Email, role = user.Role });
 });
+
 
 
 app.MapPut("/users/{id}", async (HttpContext context,int id, EmployeeDetails updatedUser, ApplicationDbContext db) => {
