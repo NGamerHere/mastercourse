@@ -4,10 +4,10 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddDistributedMemoryCache(); // Enables in-memory caching for sessions
+builder.Services.AddDistributedMemoryCache(); 
 builder.Services.AddSession(options =>
 {
-    options.IdleTimeout = TimeSpan.FromMinutes(30); 
+    options.IdleTimeout = TimeSpan.FromMinutes(30000); 
     options.Cookie.HttpOnly = true;                 
     options.Cookie.IsEssential = true;              // Ensure cookie is essential for session
 });
@@ -142,6 +142,12 @@ app.MapPut("/users/{id}", async (HttpContext context,int id, EmployeeDetails upd
     await db.SaveChangesAsync();
     return Results.Ok(user);
 });
+
+app.MapPost("/logout", (HttpContext context) => {
+    context.Session.Clear(); // Clear the session
+    return Results.Ok(new { message = "Logout successful" });
+});
+
 
 app.Run();
 
