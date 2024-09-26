@@ -1,7 +1,16 @@
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAllOrigins",
+        builder => builder.AllowAnyOrigin() 
+            .AllowAnyHeader()  
+            .AllowAnyMethod());
+});
 
 // Add services to the container.
 builder.Services.AddDistributedMemoryCache(); 
@@ -19,6 +28,8 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 });
 
 var app = builder.Build();
+
+app.UseCors("AllowAllOrigins");
 
 // Enable session middleware
 app.UseSession();
@@ -160,11 +171,11 @@ public class ApplicationDbContext : DbContext
 
     public DbSet<EmployeeDetails> EmployeeDetails { get; set; }
 }
-
+    
 public class EmployeeDetails
 {
     public int Id { get; set; }
-    public string Name { get; set; }
+    public string  Name { get; set; }
     public string Email { get; set; }
     public string Password { get; set; }
     public string Role { get; set; }
