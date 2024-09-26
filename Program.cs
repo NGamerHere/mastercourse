@@ -33,8 +33,17 @@ app.MapGet("/users/{id}", async (int id, ApplicationDbContext db) => {
     return user is not null ? Results.Ok(user) : Results.NotFound();
 });
 
-app.MapPost("/registration", async (EmployeeDetails employeeDetails, ApplicationDbContext db) => {
+app.MapPost("/registration", async (HttpContext context,EmployeeDetails employeeDetails, ApplicationDbContext db) => {
     if (employeeDetails == null) return Results.BadRequest("User is null");
+    var userIdString = context.Session.GetString("UserId");
+    var role = context.Session.GetString("role");
+    if (userIdString == null || role == null || role != "admin") {
+        var errorMessage = new {
+            message = "you are not allowed to add the details",
+            error = "per"
+        };
+        return Results.Json(errorMessage, statusCode: 404);
+    }
     
     employeeDetails.Id = 0;
     db.EmployeeDetails.Add(employeeDetails);
@@ -54,8 +63,8 @@ app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, App
         return Results.Json(message, statusCode: 404); }
 
     if (user.Password == loginDetails.Password) {
-        // Store session data after successful login
         context.Session.SetString("UserId", user.Id.ToString());
+        context.Session.SetString("role", user.Role);
 
         var successMessage = new
         {
@@ -95,8 +104,7 @@ app.MapGet("/dashboard", async (HttpContext context, ApplicationDbContext db) =>
     // Find the user by their ID
     var user = await db.EmployeeDetails.FindAsync(userId);
 
-    if (user == null)
-    {
+    if (user == null) {
         var errorMessage = new { message = "User not found" };
         return Results.Json(errorMessage, statusCode: 404);
     }
@@ -113,7 +121,16 @@ app.MapGet("/dashboard", async (HttpContext context, ApplicationDbContext db) =>
 });
 
 
-app.MapPut("/users/{id}", async (int id, EmployeeDetails updatedUser, ApplicationDbContext db) => {
+app.MapPut("/users/{id}", async (HttpContext context,int id, EmployeeDetails updatedUser, ApplicationDbContext db) => {
+    var userIdString = context.Session.GetString("UserId");
+    var role = context.Session.GetString("role");
+    if (userIdString == null || role == null || role != "admin") {
+        var errorMessage = new {
+            message = "you are not allowed to change the details",
+            error = "per"
+        };
+        return Results.Json(errorMessage, statusCode: 404);
+    }    
     var user = await db.EmployeeDetails.FindAsync(id);
     if (user == null) { return Results.NotFound(); }
 
