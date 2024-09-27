@@ -139,6 +139,100 @@ app.MapPost("/logout", (HttpContext context) => {
     return Results.Ok(new { message = "Logout successful" });
 });
 
+    app.MapGet("/courses", async (ApplicationDbContext db) =>
+    await db.Courses.ToListAsync());
+
+
+app.MapGet("/employee-progress", async (ApplicationDbContext db) =>
+    await db.EmployeeProgress.ToListAsync());
+
+
+app.MapPost("/employee-progress", async (HttpContext context, EmployeeProgress progress, ApplicationDbContext db) =>
+{
+    var employeeIdString = context.Session.GetString("UserId");
+
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        var message = new { message = "User is not logged in" };
+        return Results.Json(message,statusCode:401);
+    }
+
+    progress.EmployeeID = employeeId; 
+
+    db.EmployeeProgress.Add(progress);
+    await db.SaveChangesAsync();
+    return Results.Created($"/employee-progress/{progress.Id}", progress);
+});
+
+app.MapPut("/employee-progress/{id}", async (HttpContext context, int id, EmployeeProgress updatedProgress, ApplicationDbContext db) => {
+    var employeeIdString = context.Session.GetString("UserId");
+
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        var message = new { message = "User is not logged in" };
+        return Results.Json(message, statusCode: 401);
+    }
+
+    var progress = await db.EmployeeProgress.FindAsync(id);
+    if (progress == null) {
+        return Results.NotFound();
+    }
+
+    
+    if (progress.EmployeeID != employeeId) {
+        return Results.Json(new { message = "You are not allowed to update this progress entry" }, statusCode: 403);
+    }
+
+    
+    if (updatedProgress.ModulesCompleted > 0) { progress.ModulesCompleted = updatedProgress.ModulesCompleted; }
+
+    if (updatedProgress.TotalModule > 0) { progress.TotalModule = updatedProgress.TotalModule; }
+
+    if (progress.TotalModule > 0)
+    {
+        progress.Progress = (float)progress.ModulesCompleted / progress.TotalModule * 100;
+    }
+    else
+    {
+        progress.Progress = 0;
+    }
+
+    await db.SaveChangesAsync();
+    return Results.Ok(progress);
+});
+
+
+app.MapGet("/completed-courses", async (HttpContext context, ApplicationDbContext db) => {
+    var employeeIdString = context.Session.GetString("UserId");
+
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        return Results.Json(new { message = "User is not logged in" }, statusCode: 401);
+    }
+
+    var completedCourses = await db.EmployeeProgress
+        .Where(ep => ep.EmployeeID == employeeId && ep.Progress == 100.0)
+        .Join(db.Courses,
+            ep => ep.CourseID,
+            course => course.Id,
+            (ep, course) => new 
+            {
+                CourseId = course.Id,
+                CourseName = course.CourseName,
+                Details = course.Details,
+                ModulesCompleted = ep.ModulesCompleted,
+                TotalModules = ep.TotalModule,
+                Progress = ep.Progress
+            })
+        .ToListAsync();
+
+    return completedCourses.Any() ? Results.Ok(completedCourses) : Results.NoContent();
+});
+
+
+
+
+
 
 app.Run();
 
@@ -150,7 +244,24 @@ public class ApplicationDbContext : DbContext
     }
 
     public DbSet<EmployeeDetails> EmployeeDetails { get; set; }
+    public DbSet<Course> Courses { get; set; }
+    public DbSet<EmployeeProgress> EmployeeProgress { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<EmployeeProgress>()
+            .HasOne<EmployeeDetails>()
+            .WithMany()
+            .HasForeignKey(ep => ep.EmployeeID);
+
+        modelBuilder.Entity<EmployeeProgress>()
+            .HasOne<Course>()
+            .WithMany()
+            .HasForeignKey(ep => ep.CourseID);
+    }
 }
+
+
     
 public class EmployeeDetails
 {
@@ -166,3 +277,22 @@ public class LoginDetails
     public string Email { get; set; }
     public string Password { get; set; }
 }
+
+public class Course
+{
+    public int Id { get; set; }
+    public string PlayListID { get; set; }
+    public string CourseName { get; set; }
+    public string Details { get; set; }
+}
+
+public class EmployeeProgress
+{
+    public int Id { get; set; }
+    public int EmployeeID { get; set; }
+    public int CourseID { get; set; }
+    public float Progress { get; set; }
+    public int ModulesCompleted { get; set; }
+    public int TotalModule { get; set; }
+}
+
