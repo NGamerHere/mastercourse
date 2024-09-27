@@ -228,8 +228,102 @@ app.MapGet("/completed-courses", async (HttpContext context, ApplicationDbContex
 
     return completedCourses.Any() ? Results.Ok(completedCourses) : Results.NoContent();
 });
+app.MapPost("/module-progress", async (HttpContext context, ModuleProgress moduleProgress, ApplicationDbContext db) => {
+    var employeeIdString = context.Session.GetString("UserId");
+
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        return Results.Json(new { message = "User is not logged in" }, statusCode: 401);
+    }
+
+    moduleProgress.EmployeeID = employeeId;
+    db.ModuleProgress.Add(moduleProgress);
+    await db.SaveChangesAsync();
+    return Results.Created($"/module-progress/{moduleProgress.Id}", moduleProgress);
+});
+app.MapGet("/module-progress/{courseId}", async (HttpContext context, int courseId, ApplicationDbContext db) => {
+    var employeeIdString = context.Session.GetString("UserId");
+
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        return Results.Json(new { message = "User is not logged in" }, statusCode: 401);
+    }
+
+    var modulesProgress = await db.ModuleProgress
+        .Where(mp => mp.EmployeeID == employeeId && mp.CourseID == courseId)
+        .ToListAsync();
+
+    return modulesProgress.Any() ? Results.Ok(modulesProgress) : Results.NoContent();
+});
 
 
+app.MapPost("/start-video/{courseId}", async (HttpContext context, int courseId, ApplicationDbContext db) =>
+{
+    var employeeIdString = context.Session.GetString("UserId");
+
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        return Results.Json(new { message = "User is not logged in" }, statusCode: 401);
+    }
+
+    // Check if there's already a progress entry for this employee and course
+    var progress = await db.EmployeeProgress
+        .FirstOrDefaultAsync(ep => ep.EmployeeID == employeeId && ep.CourseID == courseId);
+
+    if (progress == null)
+    {
+        // Initialize progress if it doesn't exist
+        progress = new EmployeeProgress
+        {
+            EmployeeID = employeeId,
+            CourseID = courseId,
+            ModulesCompleted = 0,
+            TotalModule = 1, 
+            Progress = 0
+        };
+        db.EmployeeProgress.Add(progress);
+    }
+    else
+    {
+        // Update existing entry if needed
+        progress.TotalModule += 1; // Increment total modules
+    }
+
+    await db.SaveChangesAsync();
+    return Results.Ok(progress);
+});
+
+
+
+app.MapPost("/next-module/{courseId}", async (HttpContext context, int courseId, ModuleProgress moduleProgress, ApplicationDbContext db) =>
+{
+    var employeeIdString = context.Session.GetString("UserId");
+
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        return Results.Json(new { message = "User is not logged in" }, statusCode: 401);
+    }
+
+    // Update ModuleProgress
+    moduleProgress.EmployeeID = employeeId;
+    moduleProgress.CourseID = courseId;
+
+    db.ModuleProgress.Add(moduleProgress);
+    await db.SaveChangesAsync();
+
+    // Update EmployeeProgress
+    var progress = await db.EmployeeProgress
+        .FirstOrDefaultAsync(ep => ep.EmployeeID == employeeId && ep.CourseID == courseId);
+
+    if (progress != null)
+    {
+        progress.ModulesCompleted += 1; // Increment completed modules
+        progress.Progress = (float)progress.ModulesCompleted / progress.TotalModule * 100;
+        await db.SaveChangesAsync();
+    }
+
+    return Results.Created($"/module-progress/{moduleProgress.Id}", moduleProgress);
+});
 
 
 
@@ -246,6 +340,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<EmployeeDetails> EmployeeDetails { get; set; }
     public DbSet<Course> Courses { get; set; }
     public DbSet<EmployeeProgress> EmployeeProgress { get; set; }
+    public DbSet<ModuleProgress> ModuleProgress { get; set; }
+
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -258,7 +354,18 @@ public class ApplicationDbContext : DbContext
             .HasOne<Course>()
             .WithMany()
             .HasForeignKey(ep => ep.CourseID);
+        
+        modelBuilder.Entity<ModuleProgress>()
+            .HasOne<EmployeeDetails>()
+            .WithMany()
+            .HasForeignKey(mp => mp.EmployeeID);
+        
+        modelBuilder.Entity<ModuleProgress>()
+            .HasOne<Course>()
+            .WithMany()
+            .HasForeignKey(mp => mp.CourseID);
     }
+
 }
 
 
@@ -284,6 +391,7 @@ public class Course
     public string PlayListID { get; set; }
     public string CourseName { get; set; }
     public string Details { get; set; }
+    public int totalModule { get; set; }
 }
 
 public class EmployeeProgress
@@ -295,4 +403,17 @@ public class EmployeeProgress
     public int ModulesCompleted { get; set; }
     public int TotalModule { get; set; }
 }
+
+public class ModuleProgress
+{
+    public int Id { get; set; }
+    public int EmployeeID { get; set; }
+    public int CourseID { get; set; }
+    public int ModuleNumber { get; set; }   
+    public bool IsCompleted { get; set; }
+
+    public EmployeeDetails Employee { get; set; }
+    public Course Course { get; set; }
+}
+
 
