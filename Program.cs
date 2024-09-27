@@ -60,7 +60,7 @@ app.MapPost("/registration", async (HttpContext context,EmployeeDetails employee
             message = "you are not allowed to add the details",
             error = "per"
         };
-        return Results.Json(errorMessage, statusCode: 404);
+        return Results.Json(errorMessage, statusCode: 401);
     }
     
     employeeDetails.Id = 0;
@@ -92,8 +92,6 @@ app.MapGet("/dashboard", async (HttpContext context, ApplicationDbContext db) =>
     var userIdString = context.Session.GetString("UserId");
     
     if (string.IsNullOrEmpty(userIdString)) {
-        Console.WriteLine(userIdString);
-        Console.WriteLine("this is called");
         return Results.Json(new { message = "User is not logged in", error = "notLogged" }, statusCode: 401);
     }
 
@@ -147,22 +145,85 @@ app.MapGet("/employee-progress", async (ApplicationDbContext db) =>
     await db.EmployeeProgress.ToListAsync());
 
 
-app.MapPost("/employee-progress", async (HttpContext context, EmployeeProgress progress, ApplicationDbContext db) =>
-{
-    var employeeIdString = context.Session.GetString("UserId");
 
-    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+app.MapPost("/add_module", async (ApplicationDbContext db, ModuleStatus modelStatus, HttpContext context) => 
+{
+    if (modelStatus == null) 
+        return Results.BadRequest();
+
+    var userIDString = context.Session.GetString("UserId");
+    if (string.IsNullOrEmpty(userIDString) || !int.TryParse(userIDString, out int userId)) 
     {
-        var message = new { message = "User is not logged in" };
-        return Results.Json(message,statusCode:401);
+        return Results.Json(new { message = "You have logged off", error = "loggedOFF" }, statusCode: 401);
+    }
+     
+    modelStatus.EmployeeID = userId;
+
+    if (modelStatus.ModuleNo < 1) {
+        return Results.BadRequest();
     }
 
-    progress.EmployeeID = employeeId; 
+    // Check if the module for the course and employee is already added
+    var existingModuleStatus = await db.ModuleStatus
+        .FirstOrDefaultAsync(ms => ms.CourseID == modelStatus.CourseID && ms.EmployeeID == userId && ms.ModuleNo == modelStatus.ModuleNo);
 
-    db.EmployeeProgress.Add(progress);
+    if (existingModuleStatus != null) {
+        // Return a message if the module is already added
+        return Results.Json(new { message = "Module already added", statusCode = 409 });
+    }
+
+    // Fetch the course to get the total number of modules
+    var course = await db.Courses.FindAsync(modelStatus.CourseID);
+    if (course == null) {
+        return Results.Json(new { message = "Course not found" }, statusCode: 404);
+    }
+
+    if (modelStatus.ModuleNo > course.totalModule) {
+        return Results.Json(new { message = "invalid module no" }, statusCode: 404);
+    }
+
+    // Add the new module to the database
+    db.ModuleStatus.Add(modelStatus);
+    
+    // Find the employee progress entry
+    var employeeProgress = await db.EmployeeProgress
+        .FirstOrDefaultAsync(ep => ep.CourseID == modelStatus.CourseID && ep.EmployeeID == userId);
+
+    
+    if (employeeProgress == null) {
+        employeeProgress = new EmployeeProgress
+        {
+            EmployeeID = userId,
+            CourseID = modelStatus.CourseID,
+            ModulesCompleted = 1,  
+            TotalModule = course.totalModule,  
+            Progress = (float)1 / course.totalModule * 100
+        };
+        db.EmployeeProgress.Add(employeeProgress);
+    }
+    else
+    {
+        employeeProgress.ModulesCompleted++;
+        employeeProgress.TotalModule = course.totalModule;  
+        if (employeeProgress.TotalModule > 0)
+        {
+            employeeProgress.Progress = (float)employeeProgress.ModulesCompleted / employeeProgress.TotalModule * 100;
+        }
+    }
+
+    // Save changes to the database
     await db.SaveChangesAsync();
-    return Results.Created($"/employee-progress/{progress.Id}", progress);
+
+    return Results.Created($"/add_module/{modelStatus.Id}", modelStatus);
 });
+
+
+
+
+
+
+
+
 
 app.MapPut("/employee-progress/{id}", async (HttpContext context, int id, EmployeeProgress updatedProgress, ApplicationDbContext db) => {
     var employeeIdString = context.Session.GetString("UserId");
@@ -186,16 +247,13 @@ app.MapPut("/employee-progress/{id}", async (HttpContext context, int id, Employ
     
     if (updatedProgress.ModulesCompleted > 0) { progress.ModulesCompleted = updatedProgress.ModulesCompleted; }
 
-    if (updatedProgress.TotalModule > 0) { progress.TotalModule = updatedProgress.TotalModule; }
+    //if (updatedProgress.TotalModule > 0) { progress.TotalModule = updatedProgress.TotalModule; }
 
     if (progress.TotalModule > 0)
     {
         progress.Progress = (float)progress.ModulesCompleted / progress.TotalModule * 100;
     }
-    else
-    {
-        progress.Progress = 0;
-    }
+    else { progress.Progress = 0; }
 
     await db.SaveChangesAsync();
     return Results.Ok(progress);
@@ -219,6 +277,7 @@ app.MapGet("/completed-courses", async (HttpContext context, ApplicationDbContex
             {
                 CourseId = course.Id,
                 CourseName = course.CourseName,
+                playlistID=course.PlayListID,
                 Details = course.Details,
                 ModulesCompleted = ep.ModulesCompleted,
                 TotalModules = ep.TotalModule,
@@ -228,6 +287,101 @@ app.MapGet("/completed-courses", async (HttpContext context, ApplicationDbContex
 
     return completedCourses.Any() ? Results.Ok(completedCourses) : Results.NoContent();
 });
+
+app.MapPost("/employee-progress", async (HttpContext context, EmployeeProgress progress, ApplicationDbContext db) =>
+{
+    var employeeIdString = context.Session.GetString("UserId");
+
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        var message = new { message = "User is not logged in" };
+        return Results.Json(message, statusCode: 401);
+    }
+    
+    var course = await db.Courses.FindAsync(progress.CourseID);
+    if (course == null)
+    {
+        var message = new { message = "Course not found" };
+        return Results.Json(message, statusCode: 404);
+    }
+
+    
+    var existingProgress = await db.EmployeeProgress
+        .FirstOrDefaultAsync(ep => ep.CourseID == progress.CourseID && ep.EmployeeID == employeeId);
+
+    if (existingProgress != null)
+    {
+        return Results.Ok(existingProgress);
+    }
+    progress.EmployeeID = employeeId;
+    progress.Progress = 0;
+    progress.ModulesCompleted = 0;
+    progress.TotalModule = course.totalModule;  
+
+    db.EmployeeProgress.Add(progress);
+    await db.SaveChangesAsync();
+    
+    return Results.Created($"/employee-progress/{progress.Id}", progress);
+});
+
+app.MapGet("/course-progress/{courseId}", async (int courseId, HttpContext context, ApplicationDbContext db) =>
+{
+    // Retrieve the User ID from session
+    var userIdString = context.Session.GetString("UserId");
+    if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
+    {
+        return Results.Json(new { message = "You are logged off", error = "loggedOFF" }, statusCode: 401);
+    }
+
+    // Check if the course exists
+    var course = await db.Courses.FindAsync(courseId);
+    if (course == null)
+    {
+        return Results.Json(new { message = "Course not found" }, statusCode: 404);
+    }
+
+    // Try to fetch the existing progress
+    var progress = await db.EmployeeProgress
+        .FirstOrDefaultAsync(ep => ep.CourseID == courseId && ep.EmployeeID == userId);
+
+    if (progress == null) // If no progress exists, create a new entry
+    {
+        progress = new EmployeeProgress
+        {
+            CourseID = courseId,
+            EmployeeID = userId,
+            Progress = 0, // Initial progress
+            ModulesCompleted = 0, // Initial modules completed
+            TotalModule = course.totalModule // Get total modules from the course
+        };
+
+        db.EmployeeProgress.Add(progress);
+        await db.SaveChangesAsync();
+    }
+
+    // Fetch completed modules for the given course and user
+    var completedModules = await db.ModuleStatus
+        .Where(ms => ms.CourseID == courseId && ms.EmployeeID == userId)
+        .Select(ms => new 
+        {
+            ms.ModuleNo,  // Include any additional fields if needed
+        })
+        .ToListAsync();
+
+    return Results.Ok(new 
+    { 
+        courseId = progress.CourseID,
+        courseName = course.CourseName,
+        courseDetails = course.Details,
+        playlistID = course.PlayListID,
+        modulesCompleted = progress.ModulesCompleted,
+        totalModule = progress.TotalModule,
+        progressPercentage = progress.Progress,
+        completedModules = completedModules // Completed module information
+    });
+});
+
+
 
 
 
@@ -246,6 +400,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<EmployeeDetails> EmployeeDetails { get; set; }
     public DbSet<Course> Courses { get; set; }
     public DbSet<EmployeeProgress> EmployeeProgress { get; set; }
+    public DbSet<ModuleStatus> ModuleStatus { get; set; }
+
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -258,7 +414,18 @@ public class ApplicationDbContext : DbContext
             .HasOne<Course>()
             .WithMany()
             .HasForeignKey(ep => ep.CourseID);
+        
+        modelBuilder.Entity<ModuleStatus>()
+            .HasOne(m => m.Course)
+            .WithMany()
+            .HasForeignKey(m => m.CourseID);
+
+        modelBuilder.Entity<ModuleStatus>()
+            .HasOne(m => m.EmployeeDetail)
+            .WithMany()
+            .HasForeignKey(m => m.EmployeeID);
     }
+
 }
 
 
@@ -284,6 +451,7 @@ public class Course
     public string PlayListID { get; set; }
     public string CourseName { get; set; }
     public string Details { get; set; }
+    public int totalModule { get; set; }
 }
 
 public class EmployeeProgress
@@ -295,4 +463,15 @@ public class EmployeeProgress
     public int ModulesCompleted { get; set; }
     public int TotalModule { get; set; }
 }
+
+public class ModuleStatus {
+    public int Id { get; set; }
+    public int CourseID { get; set; }
+    public int EmployeeID { get; set; }
+    public int ModuleNo { get; set; }
+    public Course? Course { get; set; }  
+    public EmployeeDetails? EmployeeDetail { get; set; }  
+}
+
+
 
