@@ -55,7 +55,15 @@ app.MapGet("/users", async (ApplicationDbContext db,HttpContext context) => {
     return users.Any() ? Results.Ok(users) : Results.NoContent();
 });
 
-app.MapGet("/users/{id}", async (int id, ApplicationDbContext db) => {
+app.MapGet("/users/{id}", async (int id,HttpContext context, ApplicationDbContext db) => {
+    var role = context.Session.GetString("role");
+
+    if (role == null && role == "admin")
+    {
+        return Results.Json(new {
+            message="you are not authorized to access this page",
+        }, statusCode:401 );
+    }
     var user = await db.EmployeeDetails.FindAsync(id);
     return user is not null ? Results.Ok(user) : Results.NotFound();
 });
