@@ -663,6 +663,53 @@ app.MapGet("/all-courses", async (HttpContext context, ApplicationDbContext dbCo
     return Results.Ok(courseDetails);
 });
 
+app.MapGet("/user-progress", async (ApplicationDbContext db) =>
+{
+    var userProgress = await db.EmployeeProgress
+        .Join(db.EmployeeDetails,
+            ep => ep.EmployeeID,
+            ed => ed.Id,
+            (ep, ed) => new { ep, ed })
+        .Join(db.Courses,
+            combined => combined.ep.CourseID,
+            c => c.Id,
+            (combined, c) => new 
+            {
+                UserId = "USER" + combined.ed.Id.ToString("D3"),
+                Username = combined.ed.Name,
+                Progress = combined.ep.Progress,
+                CourseName = c.CourseName,
+                CompletionDate = combined.ep.Progress == 100 ? DateTime.Now.ToString("yyyy-MM-dd") : null
+            })
+        .ToListAsync();
+
+    return Results.Json(userProgress);
+});
+
+app.MapGet("/user/progress", async (ApplicationDbContext db, HttpContext context) => {
+    var employeeIdString = context.Session.GetString("UserId");
+    Console.WriteLine(employeeIdString);
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        return Results.Json(new { message = "You have been logged off" }, statusCode: 401);
+    }
+
+    var courseProgress = await db.EmployeeProgress
+        .Where(ep => ep.EmployeeID == employeeId) 
+        .Join(db.Courses,
+            ep => ep.CourseID,
+            c => c.Id,
+            (ep, c) => new 
+            {
+                Title = c.CourseName,
+                CourseId = c.PlayListID,
+                Progress = ep.Progress
+            })
+        .ToListAsync();
+
+    return Results.Ok(courseProgress);
+});
+
 
 app.Run("http://localhost:5126/");
 
