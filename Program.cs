@@ -72,6 +72,7 @@ app.MapPost("/registration", async (HttpContext context,EmployeeDetails employee
     if (employeeDetails == null) return Results.BadRequest("User is null");
     var userIdString = context.Session.GetString("UserId");
     var role = context.Session.GetString("role");
+    Console.WriteLine(role);
     if (userIdString == null || role == null || role != "admin") {
         var errorMessage = new {
             message = "you are not allowed to add the details",
@@ -87,6 +88,28 @@ app.MapPost("/registration", async (HttpContext context,EmployeeDetails employee
         
 });
 
+app.MapDelete("/users/{id}", async (int id, HttpContext context, ApplicationDbContext db) => {
+    var role = context.Session.GetString("role");
+
+    if (role == null || role != "admin") {
+        return Results.Json(new {
+            message = "You are not authorized to access this page",
+        }, statusCode: 401);
+    }
+
+    var user = await db.EmployeeDetails.FindAsync(id);
+    if (user == null)
+    {
+        return Results.NotFound(); 
+    }
+
+    db.EmployeeDetails.Remove(user); 
+    await db.SaveChangesAsync(); 
+
+    return Results.NoContent();
+});
+
+
 app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, ApplicationDbContext db) => {
     var user = await db.EmployeeDetails.FirstOrDefaultAsync(u => u.Email == loginDetails.Email);
 
@@ -95,9 +118,7 @@ app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, App
     if (user.Password == loginDetails.Password) {
         context.Session.SetString("UserId", user.Id.ToString());
         context.Session.SetString("role", user.Role);
-        Console.WriteLine(user.Id.ToString());
-        Console.WriteLine(user.Role);   
-        return Results.Json(new { message = "Login successful", UserId = user.Id }, statusCode: 200);
+        return Results.Json(new { message = "Login successful", UserId = user.Id,role=user.Role }, statusCode: 200);
     }
 
     return Results.Json(new { message = "Invalid password" }, statusCode: 401);
@@ -153,6 +174,7 @@ app.MapPost("/logout", (HttpContext context) => {
 });
 
 app.MapGet("/courses", async (ApplicationDbContext db) => await db.Courses.ToListAsync());
+
 
 
 app.MapGet("/employee-progress", async (ApplicationDbContext db) =>
@@ -537,6 +559,49 @@ app.MapPost("/admin/add-course", async (HttpContext context, ApplicationDbContex
 
     return Results.Created($"/courses/{newCourse.Id}", newCourse);
 });
+app.MapPut("/admin/edit-course/{id}", async (HttpContext context, ApplicationDbContext db, int id, Course updatedCourse) =>
+{
+    var userRoleString = context.Session.GetString("role");
+    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "Admin")
+    {
+        return Results.Json(new { message = "You are not authorized to edit courses", error = "unauthorized" }, statusCode: 403);
+    }
+
+    var course = await db.Courses.FindAsync(id);
+    if (course == null)
+    {
+        return Results.NotFound(new { message = "Course not found", error = "not_found" });
+    }
+
+    // Update the course properties
+    course.CourseName = updatedCourse.CourseName;
+    course.PlayListID = updatedCourse.PlayListID;
+    course.Details = updatedCourse.Details;
+    course.totalModule = updatedCourse.totalModule;
+    await db.SaveChangesAsync();
+
+    return Results.Ok(course);  // Return the updated course details
+});
+
+app.MapDelete("/admin/delete-course/{id}", async (HttpContext context, ApplicationDbContext db, int id) =>
+{
+    var userRoleString = context.Session.GetString("role");
+    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "Admin") {
+        return Results.Json(new { message = "You are not authorized to delete courses", error = "unauthorized" }, statusCode: 403);
+    }
+
+    var course = await db.Courses.FindAsync(id);
+    if (course == null)
+    {
+        return Results.NotFound(new { message = "Course not found", error = "not_found" });
+    }
+
+    db.Courses.Remove(course);
+    await db.SaveChangesAsync();
+
+    return Results.Ok(new { message = "Course deleted successfully" });
+});
+
 
 app.MapGet("/course-enrollment", async (HttpContext context, ApplicationDbContext db) => 
 {
