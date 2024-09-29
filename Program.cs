@@ -666,6 +666,7 @@ app.MapGet("/all-courses", async (HttpContext context, ApplicationDbContext dbCo
 app.MapGet("/user-progress", async (ApplicationDbContext db) =>
 {
     var userProgress = await db.EmployeeProgress
+        .Where(ep => ep.Progress == 100) 
         .Join(db.EmployeeDetails,
             ep => ep.EmployeeID,
             ed => ed.Id,
