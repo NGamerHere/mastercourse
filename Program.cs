@@ -41,12 +41,29 @@ app.UseCors("AllowAngularOrigins");
 app.UseSession();
 
 
-app.MapGet("/users", async (ApplicationDbContext db) => {
+app.MapGet("/users", async (ApplicationDbContext db,HttpContext context) => {
+    var role = context.Session.GetString("role");
+
+    if (role == null && role == "admin")
+    {
+        return Results.Json(new {
+           message="you are not authorized to access this page",
+        }, statusCode:401 );
+    }
+    
     var users = await db.EmployeeDetails.ToListAsync();
     return users.Any() ? Results.Ok(users) : Results.NoContent();
 });
 
-app.MapGet("/users/{id}", async (int id, ApplicationDbContext db) => {
+app.MapGet("/users/{id}", async (int id,HttpContext context, ApplicationDbContext db) => {
+    var role = context.Session.GetString("role");
+
+    if (role == null && role == "admin")
+    {
+        return Results.Json(new {
+            message="you are not authorized to access this page",
+        }, statusCode:401 );
+    }
     var user = await db.EmployeeDetails.FindAsync(id);
     return user is not null ? Results.Ok(user) : Results.NotFound();
 });
@@ -73,9 +90,7 @@ app.MapPost("/registration", async (HttpContext context,EmployeeDetails employee
 app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, ApplicationDbContext db) => {
     var user = await db.EmployeeDetails.FirstOrDefaultAsync(u => u.Email == loginDetails.Email);
 
-    if (user == null) {
-        return Results.Json(new { message = "Login Failed" }, statusCode: 404);
-    }
+    if (user == null) { return Results.Json(new { message = "Login Failed" }, statusCode: 404); }
 
     if (user.Password == loginDetails.Password) {
         context.Session.SetString("UserId", user.Id.ToString());
@@ -133,18 +148,28 @@ app.MapPut("/users/{id}", async (HttpContext context,int id, EmployeeDetails upd
 });
 
 app.MapPost("/logout", (HttpContext context) => {
-    context.Session.Clear(); // Clear the session
+    context.Session.Clear(); 
     return Results.Ok(new { message = "Logout successful" });
 });
 
-    app.MapGet("/courses", async (ApplicationDbContext db) =>
-    await db.Courses.ToListAsync());
+app.MapGet("/courses", async (ApplicationDbContext db) => await db.Courses.ToListAsync());
 
 
 app.MapGet("/employee-progress", async (ApplicationDbContext db) =>
     await db.EmployeeProgress.ToListAsync());
 
+app.MapGet("/get_basic_details", async (HttpContext context) => {
+    var userIdString = context.Session.GetString("UserId");
+    var role = context.Session.GetString("role");
+    if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId)) {
+        return Results.Json(new { message = "You have logged off", error = "loggedOFF" }, statusCode: 401);
+    }
 
+    return Results.Json(new {
+        userId = userId,
+        role = role
+    }, statusCode: 200 );
+});
 
 app.MapPost("/add_module", async (ApplicationDbContext db, ModuleStatus modelStatus, HttpContext context) => 
 {
@@ -218,13 +243,6 @@ app.MapPost("/add_module", async (ApplicationDbContext db, ModuleStatus modelSta
 });
 
 
-
-
-
-
-
-
-
 app.MapPut("/employee-progress/{id}", async (HttpContext context, int id, EmployeeProgress updatedProgress, ApplicationDbContext db) => {
     var employeeIdString = context.Session.GetString("UserId");
 
@@ -288,19 +306,16 @@ app.MapGet("/completed-courses", async (HttpContext context, ApplicationDbContex
     return completedCourses.Any() ? Results.Ok(completedCourses) : Results.NoContent();
 });
 
-app.MapPost("/employee-progress", async (HttpContext context, EmployeeProgress progress, ApplicationDbContext db) =>
-{
+app.MapPost("/enroll", async (HttpContext context, EmployeeProgress progress, ApplicationDbContext db) => {
     var employeeIdString = context.Session.GetString("UserId");
 
-    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
-    {
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId)) {
         var message = new { message = "User is not logged in" };
         return Results.Json(message, statusCode: 401);
     }
     
     var course = await db.Courses.FindAsync(progress.CourseID);
-    if (course == null)
-    {
+    if (course == null) {
         var message = new { message = "Course not found" };
         return Results.Json(message, statusCode: 404);
     }
@@ -339,32 +354,30 @@ app.MapGet("/course-progress/{courseId}", async (int courseId, HttpContext conte
     {
         return Results.Json(new { message = "Course not found" }, statusCode: 404);
     }
-
-    // Try to fetch the existing progress
     var progress = await db.EmployeeProgress
         .FirstOrDefaultAsync(ep => ep.CourseID == courseId && ep.EmployeeID == userId);
 
-    if (progress == null) // If no progress exists, create a new entry
+    if (progress == null) 
     {
         progress = new EmployeeProgress
         {
             CourseID = courseId,
             EmployeeID = userId,
-            Progress = 0, // Initial progress
-            ModulesCompleted = 0, // Initial modules completed
-            TotalModule = course.totalModule // Get total modules from the course
+            Progress = 0, 
+            ModulesCompleted = 0, 
+            TotalModule = course.totalModule 
         };
 
         db.EmployeeProgress.Add(progress);
         await db.SaveChangesAsync();
     }
 
-    // Fetch completed modules for the given course and user
+    
     var completedModules = await db.ModuleStatus
         .Where(ms => ms.CourseID == courseId && ms.EmployeeID == userId)
         .Select(ms => new 
         {
-            ms.ModuleNo,  // Include any additional fields if needed
+            ms.ModuleNo, 
         })
         .ToListAsync();
 
@@ -377,18 +390,216 @@ app.MapGet("/course-progress/{courseId}", async (int courseId, HttpContext conte
         modulesCompleted = progress.ModulesCompleted,
         totalModule = progress.TotalModule,
         progressPercentage = progress.Progress,
-        completedModules = completedModules // Completed module information
+        completedModules = completedModules 
     });
 });
 
+app.MapGet("/pending-progress", async (HttpContext context, ApplicationDbContext db) => {
+    var userIdString = context.Session.GetString("UserId");
+    if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
+    {
+        return Results.Json(new { message = "You are logged off", error = "loggedOFF" }, statusCode: 401);
+    }
+    
+    var pendingProgress = await db.EmployeeProgress
+        .Where(ep => ep.EmployeeID == userId && ep.Progress > 0 && ep.Progress < 100) 
+        .Join(db.Courses,
+            ep => ep.CourseID,
+            course => course.Id,
+            (ep, course) => new
+            {
+                EmployeeId = ep.EmployeeID,
+                CourseId = course.Id,
+                CourseName = course.CourseName,
+                Progress = ep.Progress,
+                ModulesCompleted = ep.ModulesCompleted,
+                playlistID=course.PlayListID,
+                TotalModules = ep.TotalModule   
+            })
+        .ToListAsync();
+
+    return pendingProgress.Any() ? Results.Ok(pendingProgress) : Results.NoContent();
+});
+
+app.MapGet("/progress-details", async (HttpContext context, ApplicationDbContext db) =>
+{
+    var userIdString = context.Session.GetString("UserId");
+    if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId)) {
+        return Results.Json(new { message = "You are logged off", error = "loggedOFF" }, statusCode: 401);
+    }
+
+    var progressDetails = await db.EmployeeProgress
+        .Where(ep => ep.EmployeeID == userId) 
+        .Join(db.Courses,
+            ep => ep.CourseID,
+            course => course.Id,
+            (ep, course) => new
+            {
+                EmployeeId = ep.EmployeeID,
+                CourseId = course.Id,
+                CourseName = course.CourseName,
+                Progress = ep.Progress,
+                ModulesCompleted = ep.ModulesCompleted,
+                playlistID=course.PlayListID,
+                TotalModules = ep.TotalModule,
+            })
+        .ToListAsync();
+
+    
+    return progressDetails.Any() ? Results.Ok(progressDetails) : Results.NoContent();
+});
+
+app.MapGet("/watch-later", async (HttpContext context, ApplicationDbContext db) =>
+{
+    var userIdString = context.Session.GetString("UserId");
+    if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
+    {
+        return Results.Json(new { message = "You are logged off", error = "loggedOFF" }, statusCode: 401);
+    }
+    
+    var watchLaterCourses = await db.EmployeeProgress
+        .Where(ep => ep.EmployeeID == userId && ep.Progress == 0) 
+        .Join(db.Courses,
+            ep => ep.CourseID,
+            course => course.Id,
+            (ep, course) => new
+            {
+                EmployeeId = ep.EmployeeID,
+                CourseId = course.Id,
+                playlistID = course.PlayListID,
+                CourseName = course.CourseName,
+                Progress = ep.Progress,
+                ModulesCompleted = ep.ModulesCompleted,
+                TotalModules = course.totalModule,
+                Status = "added-to-watch-later"
+            })
+        .ToListAsync();
+
+    
+    return watchLaterCourses.Any() ? Results.Ok(watchLaterCourses) : Results.NoContent();
+});
+
+app.MapGet("/course-progress-chart", async (HttpContext context, ApplicationDbContext db) => {
+    var userIdString = context.Session.GetString("UserId");
+
+    if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId))
+    {
+        return Results.Json(new { message = "You are logged off", error = "loggedOFF" }, statusCode: 401);
+    }
+    
+    var chartData = await db.EmployeeProgress
+        .Where(ep => ep.EmployeeID == userId) // Filter for the logged-in employee
+        .Join(db.Courses,
+            ep => ep.CourseID,
+            course => course.Id,
+            (ep, course) => new
+            {
+                CourseName = course.CourseName,
+                Progress = ep.Progress
+            })
+        .GroupBy(x => x.CourseName)
+        .Select(g => new
+        {
+            CourseName = g.Key,
+            AverageProgress = g.Average(x => x.Progress) 
+        })
+        .ToListAsync();
+
+    
+    var chartResponse = new
+    {
+        labels = chartData.Select(cd => cd.CourseName).ToList(), 
+        datasets = new[]
+        {
+            new
+            {
+                label = "Course Progress",
+                data = chartData.Select(cd => cd.AverageProgress).ToList(), // Progress for y-axis
+                backgroundColor = "rgba(75, 192, 192, 0.2)",
+                borderColor = "rgba(75, 192, 192, 1)",
+                borderWidth = 1
+            }
+        }
+    };
+
+    return Results.Ok(chartResponse);
+});
+
+app.MapPost("/admin/add-course", async (HttpContext context, ApplicationDbContext db, Course newCourse) =>
+{
+    var userRoleString = context.Session.GetString("role");
+    if (string.IsNullOrEmpty(userRoleString) || userRoleString == "Admin"){
+        return Results.Json(new { message = "You are not authorized to add courses", error = "unauthorized" }, statusCode: 403);
+    }
+    
+    db.Courses.Add(newCourse);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/courses/{newCourse.Id}", newCourse);
+});
+
+app.MapGet("/course-enrollment", async (HttpContext context, ApplicationDbContext db) => 
+{
+    var userIdString = context.Session.GetString("UserId");
+    var role = context.Session.GetString("role");
+    
+    if (string.IsNullOrEmpty(userIdString) || role != "admin") 
+    {
+        return Results.Json(new { message = "You are not authorized to view this data." }, statusCode: 403);
+    }
+
+    var courseEnrollmentData = await db.EmployeeProgress
+        .GroupBy(ep => ep.CourseID)
+        .Select(group => new {
+            CourseName = db.Courses.FirstOrDefault(c => c.Id == group.Key).CourseName,
+            TotalStudents = group.Count()
+        })
+        .ToListAsync();
+
+    return courseEnrollmentData.Any() ? Results.Ok(courseEnrollmentData) : Results.NoContent();
+});
+
+app.MapGet("/all-courses", async (HttpContext context, ApplicationDbContext dbContext) =>
+{
+    var employeeIdString = context.Session.GetString("UserId");
+    
+    if (string.IsNullOrEmpty(employeeIdString)) {
+        return Results.Json(new { message = "You have been logged off" }, statusCode: 401);
+    }
+    
+    if (!int.TryParse(employeeIdString, out var employeeId)) {
+        return Results.Json(new { message = "Invalid employee ID" }, statusCode: 400);
+    }
+    
+    var courses = await dbContext.Courses.ToListAsync();
+     
+    var courseDetails = courses.Select(course =>
+    {
+        var progress = dbContext.EmployeeProgress
+            .FirstOrDefault(ep => ep.CourseID == course.Id && ep.EmployeeID == employeeId);
+
+        
+        bool isEnrolled = progress != null;
+
+        return new
+        {
+            course.Id,
+            course.PlayListID,
+            course.CourseName,
+            course.Details,
+            course.totalModule,
+            Progress = progress?.Progress,
+            ModulesCompleted = progress?.ModulesCompleted,
+            Status = isEnrolled ? "Enrolled" : "Not Enrolled", 
+            IsEnrolled = isEnrolled 
+        };
+    });
+
+    return Results.Ok(courseDetails);
+});
 
 
-
-
-
-
-
-app.Run();
+app.Run("http://localhost:5126/");
 
 public class ApplicationDbContext : DbContext
 {
