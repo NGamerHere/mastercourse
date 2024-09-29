@@ -564,7 +564,6 @@ app.MapPut("/admin/edit-course/{id}", async (HttpContext context, ApplicationDbC
     var userRoleString = context.Session.GetString("role");
     Console.Write(userRoleString);
     if (string.IsNullOrEmpty(userRoleString) || userRoleString != "admin") {
-        Console.WriteLine("this is called");
         return Results.Json(new { message = "You are not authorized to edit courses", error = "unauthorized" }, statusCode: 403);
     }
     Console.WriteLine(id);
@@ -587,7 +586,7 @@ app.MapPut("/admin/edit-course/{id}", async (HttpContext context, ApplicationDbC
 app.MapDelete("/admin/delete-course/{id}", async (HttpContext context, ApplicationDbContext db, int id) =>
 {
     var userRoleString = context.Session.GetString("role");
-    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "Admin") {
+    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "admin") {
         return Results.Json(new { message = "You are not authorized to delete courses", error = "unauthorized" }, statusCode: 403);
     }
 
