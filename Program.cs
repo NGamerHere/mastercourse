@@ -562,11 +562,12 @@ app.MapPost("/admin/add-course", async (HttpContext context, ApplicationDbContex
 app.MapPut("/admin/edit-course/{id}", async (HttpContext context, ApplicationDbContext db, int id, Course updatedCourse) =>
 {
     var userRoleString = context.Session.GetString("role");
-    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "Admin")
-    {
+    Console.Write(userRoleString);
+    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "admin") {
+        Console.WriteLine("this is called");
         return Results.Json(new { message = "You are not authorized to edit courses", error = "unauthorized" }, statusCode: 403);
     }
-
+    Console.WriteLine(id);
     var course = await db.Courses.FindAsync(id);
     if (course == null)
     {
