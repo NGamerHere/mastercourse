@@ -148,12 +148,11 @@ app.MapPut("/users/{id}", async (HttpContext context,int id, EmployeeDetails upd
 });
 
 app.MapPost("/logout", (HttpContext context) => {
-    context.Session.Clear(); // Clear the session
+    context.Session.Clear(); 
     return Results.Ok(new { message = "Logout successful" });
 });
 
-    app.MapGet("/courses", async (ApplicationDbContext db) =>
-    await db.Courses.ToListAsync());
+app.MapGet("/courses", async (ApplicationDbContext db) => await db.Courses.ToListAsync());
 
 
 app.MapGet("/employee-progress", async (ApplicationDbContext db) =>
@@ -414,7 +413,8 @@ app.MapGet("/pending-progress", async (HttpContext context, ApplicationDbContext
                 CourseName = course.CourseName,
                 Progress = ep.Progress,
                 ModulesCompleted = ep.ModulesCompleted,
-                TotalModules = ep.TotalModule
+                playlistID=course.PlayListID,
+                TotalModules = ep.TotalModule   
             })
         .ToListAsync();
 
@@ -440,6 +440,7 @@ app.MapGet("/progress-details", async (HttpContext context, ApplicationDbContext
                 CourseName = course.CourseName,
                 Progress = ep.Progress,
                 ModulesCompleted = ep.ModulesCompleted,
+                playlistID=course.PlayListID,
                 TotalModules = ep.TotalModule,
             })
         .ToListAsync();
@@ -465,6 +466,7 @@ app.MapGet("/watch-later", async (HttpContext context, ApplicationDbContext db) 
             {
                 EmployeeId = ep.EmployeeID,
                 CourseId = course.Id,
+                playlistID = course.PlayListID,
                 CourseName = course.CourseName,
                 Progress = ep.Progress,
                 ModulesCompleted = ep.ModulesCompleted,
@@ -557,9 +559,47 @@ app.MapGet("/course-enrollment", async (HttpContext context, ApplicationDbContex
     return courseEnrollmentData.Any() ? Results.Ok(courseEnrollmentData) : Results.NoContent();
 });
 
+app.MapGet("/all-courses", async (HttpContext context, ApplicationDbContext dbContext) =>
+{
+    var employeeIdString = context.Session.GetString("UserId");
+    
+    if (string.IsNullOrEmpty(employeeIdString)) {
+        return Results.Json(new { message = "You have been logged off" }, statusCode: 401);
+    }
+    
+    if (!int.TryParse(employeeIdString, out var employeeId)) {
+        return Results.Json(new { message = "Invalid employee ID" }, statusCode: 400);
+    }
+    
+    var courses = await dbContext.Courses.ToListAsync();
+     
+    var courseDetails = courses.Select(course =>
+    {
+        var progress = dbContext.EmployeeProgress
+            .FirstOrDefault(ep => ep.CourseID == course.Id && ep.EmployeeID == employeeId);
+
+        
+        bool isEnrolled = progress != null;
+
+        return new
+        {
+            course.Id,
+            course.PlayListID,
+            course.CourseName,
+            course.Details,
+            course.totalModule,
+            Progress = progress?.Progress,
+            ModulesCompleted = progress?.ModulesCompleted,
+            Status = isEnrolled ? "Enrolled" : "Not Enrolled", 
+            IsEnrolled = isEnrolled 
+        };
+    });
+
+    return Results.Ok(courseDetails);
+});
 
 
-app.Run();
+app.Run("http://localhost:5126/");
 
 public class ApplicationDbContext : DbContext
 {
