@@ -41,7 +41,16 @@ app.UseCors("AllowAngularOrigins");
 app.UseSession();
 
 
-app.MapGet("/users", async (ApplicationDbContext db) => {
+app.MapGet("/users", async (ApplicationDbContext db,HttpContext context) => {
+    var role = context.Session.GetString("role");
+
+    if (role == null && role == "admin")
+    {
+        return Results.Json(new {
+           message="you are not authorized to access this page",
+        }, statusCode:401 );
+    }
+    
     var users = await db.EmployeeDetails.ToListAsync();
     return users.Any() ? Results.Ok(users) : Results.NoContent();
 });
@@ -73,9 +82,7 @@ app.MapPost("/registration", async (HttpContext context,EmployeeDetails employee
 app.MapPost("/login", async (HttpContext context, LoginDetails loginDetails, ApplicationDbContext db) => {
     var user = await db.EmployeeDetails.FirstOrDefaultAsync(u => u.Email == loginDetails.Email);
 
-    if (user == null) {
-        return Results.Json(new { message = "Login Failed" }, statusCode: 404);
-    }
+    if (user == null) { return Results.Json(new { message = "Login Failed" }, statusCode: 404); }
 
     if (user.Password == loginDetails.Password) {
         context.Session.SetString("UserId", user.Id.ToString());
@@ -144,7 +151,18 @@ app.MapPost("/logout", (HttpContext context) => {
 app.MapGet("/employee-progress", async (ApplicationDbContext db) =>
     await db.EmployeeProgress.ToListAsync());
 
+app.MapGet("/get_basic_details", async (HttpContext context) => {
+    var userIdString = context.Session.GetString("UserId");
+    var role = context.Session.GetString("role");
+    if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out int userId)) {
+        return Results.Json(new { message = "You have logged off", error = "loggedOFF" }, statusCode: 401);
+    }
 
+    return Results.Json(new {
+        userId = userId,
+        role = role
+    }, statusCode: 200 );
+});
 
 app.MapPost("/add_module", async (ApplicationDbContext db, ModuleStatus modelStatus, HttpContext context) => 
 {
@@ -216,13 +234,6 @@ app.MapPost("/add_module", async (ApplicationDbContext db, ModuleStatus modelSta
 
     return Results.Created($"/add_module/{modelStatus.Id}", modelStatus);
 });
-
-
-
-
-
-
-
 
 
 app.MapPut("/employee-progress/{id}", async (HttpContext context, int id, EmployeeProgress updatedProgress, ApplicationDbContext db) => {
@@ -504,7 +515,39 @@ app.MapGet("/course-progress-chart", async (HttpContext context, ApplicationDbCo
     return Results.Ok(chartResponse);
 });
 
+app.MapPost("/admin/add-course", async (HttpContext context, ApplicationDbContext db, Course newCourse) =>
+{
+    var userRoleString = context.Session.GetString("role");
+    if (string.IsNullOrEmpty(userRoleString) || userRoleString == "Admin"){
+        return Results.Json(new { message = "You are not authorized to add courses", error = "unauthorized" }, statusCode: 403);
+    }
+    
+    db.Courses.Add(newCourse);
+    await db.SaveChangesAsync();
 
+    return Results.Created($"/courses/{newCourse.Id}", newCourse);
+});
+
+app.MapGet("/course-enrollment", async (HttpContext context, ApplicationDbContext db) => 
+{
+    var userIdString = context.Session.GetString("UserId");
+    var role = context.Session.GetString("role");
+    
+    if (string.IsNullOrEmpty(userIdString) || role != "admin") 
+    {
+        return Results.Json(new { message = "You are not authorized to view this data." }, statusCode: 403);
+    }
+
+    var courseEnrollmentData = await db.EmployeeProgress
+        .GroupBy(ep => ep.CourseID)
+        .Select(group => new {
+            CourseName = db.Courses.FirstOrDefault(c => c.Id == group.Key).CourseName,
+            TotalStudents = group.Count()
+        })
+        .ToListAsync();
+
+    return courseEnrollmentData.Any() ? Results.Ok(courseEnrollmentData) : Results.NoContent();
+});
 
 
 
