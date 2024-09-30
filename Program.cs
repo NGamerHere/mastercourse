@@ -562,11 +562,11 @@ app.MapPost("/admin/add-course", async (HttpContext context, ApplicationDbContex
 app.MapPut("/admin/edit-course/{id}", async (HttpContext context, ApplicationDbContext db, int id, Course updatedCourse) =>
 {
     var userRoleString = context.Session.GetString("role");
-    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "Admin")
-    {
+    Console.Write(userRoleString);
+    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "admin") {
         return Results.Json(new { message = "You are not authorized to edit courses", error = "unauthorized" }, statusCode: 403);
     }
-
+    Console.WriteLine(id);
     var course = await db.Courses.FindAsync(id);
     if (course == null)
     {
@@ -586,7 +586,7 @@ app.MapPut("/admin/edit-course/{id}", async (HttpContext context, ApplicationDbC
 app.MapDelete("/admin/delete-course/{id}", async (HttpContext context, ApplicationDbContext db, int id) =>
 {
     var userRoleString = context.Session.GetString("role");
-    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "Admin") {
+    if (string.IsNullOrEmpty(userRoleString) || userRoleString != "admin") {
         return Results.Json(new { message = "You are not authorized to delete courses", error = "unauthorized" }, statusCode: 403);
     }
 
@@ -661,6 +661,54 @@ app.MapGet("/all-courses", async (HttpContext context, ApplicationDbContext dbCo
     });
 
     return Results.Ok(courseDetails);
+});
+
+app.MapGet("/user-progress", async (ApplicationDbContext db) =>
+{
+    var userProgress = await db.EmployeeProgress
+        .Where(ep => ep.Progress == 100) 
+        .Join(db.EmployeeDetails,
+            ep => ep.EmployeeID,
+            ed => ed.Id,
+            (ep, ed) => new { ep, ed })
+        .Join(db.Courses,
+            combined => combined.ep.CourseID,
+            c => c.Id,
+            (combined, c) => new 
+            {
+                UserId = "USER" + combined.ed.Id.ToString("D3"),
+                Username = combined.ed.Name,
+                Progress = combined.ep.Progress,
+                CourseName = c.CourseName,
+                CompletionDate = combined.ep.Progress == 100 ? DateTime.Now.ToString("yyyy-MM-dd") : null
+            })
+        .ToListAsync();
+
+    return Results.Json(userProgress);
+});
+
+app.MapGet("/user/progress", async (ApplicationDbContext db, HttpContext context) => {
+    var employeeIdString = context.Session.GetString("UserId");
+    Console.WriteLine(employeeIdString);
+    if (string.IsNullOrEmpty(employeeIdString) || !int.TryParse(employeeIdString, out int employeeId))
+    {
+        return Results.Json(new { message = "You have been logged off" }, statusCode: 401);
+    }
+
+    var courseProgress = await db.EmployeeProgress
+        .Where(ep => ep.EmployeeID == employeeId) 
+        .Join(db.Courses,
+            ep => ep.CourseID,
+            c => c.Id,
+            (ep, c) => new 
+            {
+                Title = c.CourseName,
+                CourseId = c.PlayListID,
+                Progress = ep.Progress
+            })
+        .ToListAsync();
+
+    return Results.Ok(courseProgress);
 });
 
 
